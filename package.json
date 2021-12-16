@@ -1,0 +1,17 @@
+{
+  "name": "swagger-to-typed-requests",
+  "version": "0.0.1",
+  "scripts": {
+    "start": "echo please run this program directly using `node dist/index.js`",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "commander": "^8.2.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.3",
+    "@types/node": "^16.10.5",
+    "typescript": "^4.5.4"
+  }
+}

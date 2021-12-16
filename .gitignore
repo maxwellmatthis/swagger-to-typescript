@@ -1,0 +1,5 @@
+# npm modules
+node_modules/
+
+# MacOS file manager layout
+.DS_Store
