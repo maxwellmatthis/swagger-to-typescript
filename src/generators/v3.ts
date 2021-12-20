@@ -15,7 +15,19 @@ export class Generator {
    * @returns code made of individual accessor functions meant to be saved to a TypeScript module File
    */
   public generateTypedFunctions(): string {
-    let code: string = "";
+    let code: string = `
+export interface Res<Data> {
+  ok: boolean,
+  data?: Data,
+  networkError?: boolean;
+}
+
+const NETWORK_ERROR: Res<{ reason: string }> = {
+  ok: false,
+  data: { reason: "There was a network error. Please try again." },
+  networkError: true
+};
+\n`;
 
     for (const pathName in this.schema.paths) {
       let path = this.schema.paths[pathName];
@@ -69,6 +81,7 @@ export class Generator {
 
     // Fetch Request Options
     const requestParams: string[] = [];
+    requestParams.push(`method: "${operationName.toUpperCase()}"`);
     if (operation.requestBody) {
       const rb: RequestBody | undefined = "$ref" in operation.requestBody
         ? this.loadRef(operation.requestBody.$ref)
@@ -102,6 +115,10 @@ export class Generator {
    */
   private genReturnTypes(responses: Responses) {
     const types: string[] = [];
+
+    // For NETWORK_ERROR used at top of `generateTypedFunctions()`
+    // and second catch in `composeAccessorFunction()`
+    types.push("{ reason: string }");
 
     for (const responseName of Object.keys(responses) as [keyof Responses]) {
       let response = responses[responseName];
@@ -226,12 +243,20 @@ function composeAccessorFunction(
   fetchParams: string[],
   returnSignature: string
 ): string {
-  // TODO: use a different way of deserializing than `await r.json()` for non-json data
+  // TODO: add a different way of deserializing other than `await r.json()` for non-json data
   return `${jsDoc}
-export async function ${name}(${joinArguments(funcParams, 40)}): Promise<{ data: ${returnSignature}; } & Response> {
-  const r = await fetch(${joinArguments(fetchParams, 60, 2, 2)});
-  const d = await r.json();
-  return Object.assign(r, { data: d });
+export async function ${name}(${joinArguments(funcParams, 40)}): Promise<Res<${returnSignature}>> {
+  try {
+    const r = await fetch(${joinArguments(fetchParams, 60, 4, 2)});
+    try {
+      return { ok: r.ok, data: await r.json() };
+    } catch (e) {
+      return { ok: r.ok };
+    }
+  } catch (e) {
+    console.error(e);
+    return NETWORK_ERROR;
+  }
 }\n\n`;
 };
 
