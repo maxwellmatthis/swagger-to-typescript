@@ -156,7 +156,7 @@ const NETWORK_ERROR: Res<{ reason: string }> = {
           let keys: string[] = [];
           if (thing.properties) {
             for (const key of Object.keys(thing.properties) as [keyof Schema]) {
-              keys.push(`${key}: ${this.schemaToTypescriptDefinition(thing.properties[key])}`);
+              keys.push(`${typeof key === "string" ? safeVariableName(key) : key}: ${this.schemaToTypescriptDefinition(thing.properties[key])}`);
             }
           }
           if (thing.additionalProperties?.type) keys.push(`[key:string]: ${this.schemaToTypescriptDefinition(thing.additionalProperties)}`);
@@ -287,6 +287,8 @@ function genJsDoc(
 
 /**
  * @returns string that can be safely used as a variable name in JavaScript
+ * 
+ * Example: `hello-world` becomes `helloWorld`
  */
 function safeVariableName(context: string): string {
   const allowed = /[A-Za-z0-9_$]/;
