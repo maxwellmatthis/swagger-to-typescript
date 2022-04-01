@@ -72,7 +72,7 @@ const NETWORK_ERROR: Res<{ reason: string }> = {
             fetchParams.push(`\`${"${host}"}${pathName}\``);
         }
         else
-            fetchParams.push(`${server.url}${pathName}`);
+            fetchParams.push(`'${server.url}${pathName}'`);
         // Fetch Request Options
         const requestParams = [];
         requestParams.push(`method: "${operationName.toUpperCase()}"`);

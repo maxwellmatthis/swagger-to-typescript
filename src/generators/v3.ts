@@ -77,7 +77,7 @@ const NETWORK_ERROR: Res<{ reason: string }> = {
     if (!server?.url) {
       funcParams.push("host: string");
       fetchParams.push(`\`${"${host}"}${pathName}\``);
-    } else fetchParams.push(`${server.url}${pathName}`);
+    } else fetchParams.push(`'${server.url}${pathName}'`);
 
     // Fetch Request Options
     const requestParams: string[] = [];
