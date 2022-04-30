@@ -1,0 +1,84 @@
+openapi: 3.0.0
+info:
+  title: International Greeter
+  version: 2.5.1
+servers:
+  - url: https://greeting.example.com
+    description: The main production server
+paths:
+  /v1/hello:
+    post:
+      description: Returns hello in a random language
+      operationId: randomHello
+      responses:
+        200:
+          description: Hello in a random language along with the language
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - language
+                  - text
+                properties:
+                  language:
+                    type: string
+                    example: German
+                  text:
+                    type: string
+                    example: Hallo
+  /v1/hello/{language}:
+    post:
+      description: Returns hello in the specified language
+      operationId: helloByLanguage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - apiKey
+                - language
+              properties:
+                apiKey:
+                  type: string
+      responses:
+        200:
+          description: Hello in the specified language
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - text
+                properties:
+                  text:
+                    type: string
+                    example: 你好
+        401:
+          description: apiKey has expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        405:
+          description: Invalid language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - message
+          properties:
+            message:
+              type: string
