@@ -13,6 +13,7 @@ function cli() {
         .requiredOption("-s, --source <path-to-openapi-file>", "The path to the openapi/swagger file that you want to convert to requests")
         .requiredOption("-o, --output <path-to-api-file>", "The path to the Typescript file that will contain the typed requests", "./api.ts")
         .option("-i, --inline", "If as many things as possible should be inlined or may be spread out over different interfaces and constants")
+        .option("-d, --dent <indent> <tab/t/space/s>", "The amount of spaces or tabs with which to indent")
         .parse(process_1.argv)
         .opts();
     if ((0, fs_1.existsSync)(options.source)) {

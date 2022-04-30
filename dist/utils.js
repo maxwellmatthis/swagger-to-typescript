@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isInternalJSONReference = exports.loadRef = exports.filterDefined = exports.joinArguments = exports.safeVariableName = exports.schemaIsSupported = exports.extensionIsSupported = void 0;
+exports.isInternalJSONReference = exports.loadRef = exports.filterDefined = exports.joinArguments = exports.pathToTemplateLiteral = exports.safeVariableName = exports.schemaIsSupported = exports.extensionIsSupported = void 0;
 const fs_1 = require("fs");
 const path_1 = require("path");
 const js_yaml_1 = require("js-yaml");
@@ -40,6 +40,7 @@ exports.schemaIsSupported = schemaIsSupported;
 function safeVariableName(context) {
     const allowed = /[A-Za-z0-9_$]/;
     return context
+        .trim()
         .split("")
         .reverse()
         .map((char, index, parts) => char.match(allowed)
@@ -51,6 +52,25 @@ function safeVariableName(context) {
         .join("");
 }
 exports.safeVariableName = safeVariableName;
+/**
+ * Transforms paths into template strings allowing path parameters to be set programmatically
+ * @param path a pathname (__for example:__ `/user/{username}/pictures`)
+ * @param varPrefix a string to add before each variable to have some control over the namespace the variable accesses, this prefix is not applied to the names in `variables`
+ * @return the template literal (without the backtags "`") as well as the variables needed in the template
+ */
+function pathToTemplateLiteral(path, varPrefix) {
+    const variables = [];
+    const pathParam = /{[A-Za-z0-9\-_]+}/g;
+    return {
+        templateLiteral: path.replace(pathParam, (param) => {
+            const name = safeVariableName(param.slice(1, -1));
+            variables.push(name);
+            return "${" + (varPrefix || "") + name + "}";
+        }),
+        variables
+    };
+}
+exports.pathToTemplateLiteral = pathToTemplateLiteral;
 /**
  * Joins arguments in a formatted way to be used in a function
  * @param args raw strings that may be used as function arguments (__for example__: `name: string`)

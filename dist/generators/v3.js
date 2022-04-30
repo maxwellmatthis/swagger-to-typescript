@@ -150,16 +150,18 @@ function requestHandler(schema, inline, pathName, operationName, operation, serv
     const funcParams = [];
     const fetchParams = [];
     // Host
-    // TODO: parse pathName for path parameters
+    const { templateLiteral, variables } = (0, utils_1.pathToTemplateLiteral)(pathName, "path.");
+    if (variables.length > 0)
+        funcParams.push(`path: { ${(0, utils_1.joinArguments)(variables.map((v) => v + ": string"))} }`);
     if (server.type === "main" || server.type === "scoped") {
         if (server.variable)
-            fetchParams.push(`\`\${${server.variable}}${pathName}\``);
+            fetchParams.push(`\`\${${server.variable}}${templateLiteral}\``);
         else
             fetchParams.push(`"${server.url}${pathName}"`);
     }
     else {
         funcParams.push("host: string");
-        fetchParams.push(`\`\${host}"${pathName}\``);
+        fetchParams.push(`\`\${host}"${templateLiteral}\``);
     }
     // Request data
     const requestParams = [];
@@ -210,6 +212,7 @@ function responseHandler(schema, inline, responses) {
     }
     return {
         responseSignature: [...new Set(types)].join(" | "),
+        // TODO: add other preprocessors
         autoResultPreprocessing: "await r.json()"
     };
 }

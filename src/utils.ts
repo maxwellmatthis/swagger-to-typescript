@@ -36,6 +36,7 @@ export function schemaIsSupported(schema: any) {
 export function safeVariableName(context: string): string {
   const allowed = /[A-Za-z0-9_$]/;
   return context
+    .trim()
     .split("")
     .reverse()
     .map((char, index, parts) => char.match(allowed)
@@ -46,6 +47,29 @@ export function safeVariableName(context: string): string {
     )
     .reverse()
     .join("");
+}
+
+/**
+ * Transforms paths into template strings allowing path parameters to be set programmatically
+ * @param path a pathname (__for example:__ `/user/{username}/pictures`)
+ * @param varPrefix a string to add before each variable to have some control over the namespace the variable accesses, this prefix is not applied to the names in `variables`
+ * @return the template literal (without the backtags "`") as well as the variables needed in the template
+ */
+export function pathToTemplateLiteral(path: string, varPrefix?: string): {
+  templateLiteral: string,
+  variables: string[];
+} {
+  const variables: string[] = [];
+  const pathParam = /{[A-Za-z0-9\-_]+}/g;
+
+  return {
+    templateLiteral: path.replace(pathParam, (param) => {
+      const name = safeVariableName(param.slice(1, -1));
+      variables.push(name);
+      return "${" + (varPrefix || "") + name + "}";
+    }),
+    variables
+  };
 }
 
 /**

@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "scripts": {
     "start": "echo Please run this program directly using 'node dist/index.js'",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "node tests/tests.js"
   },
   "dependencies": {
     "commander": "^8.2.0",

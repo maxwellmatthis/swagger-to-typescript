@@ -1,6 +1,6 @@
 import { OpenAPIv3, Operation, Responses, XResponse, Schema, RequestBody, PathItem, ReferenceObject } from "../types/openapi-v3";
 import { Blueprint, ConstantBlueprint, FunctionBlueprint, InterfaceBlueprint } from "../types/blueprint";
-import { safeVariableName, joinArguments, loadRef, filterDefined, isInternalJSONReference } from "../utils";
+import { safeVariableName, joinArguments, loadRef, filterDefined, isInternalJSONReference, pathToTemplateLiteral } from "../utils";
 
 /**
  * Creates a `Blueprint` from a schema
@@ -190,13 +190,14 @@ function requestHandler(
   const fetchParams: string[] = [];
 
   // Host
-  // TODO: parse pathName for path parameters
+  const { templateLiteral, variables } = pathToTemplateLiteral(pathName, "path.");
+  if (variables.length > 0) funcParams.push(`path: { ${joinArguments(variables.map((v) => v + ": string"))} }`);
   if (server.type === "main" || server.type === "scoped") {
-    if (server.variable) fetchParams.push(`\`\${${server.variable}}${pathName}\``);
+    if (server.variable) fetchParams.push(`\`\${${server.variable}}${templateLiteral}\``);
     else fetchParams.push(`"${server.url}${pathName}"`);
   } else {
     funcParams.push("host: string");
-    fetchParams.push(`\`\${host}"${pathName}\``);
+    fetchParams.push(`\`\${host}"${templateLiteral}\``);
   }
 
   // Request data
@@ -253,6 +254,7 @@ function responseHandler(schema: OpenAPIv3, inline: boolean, responses: Response
 
   return {
     responseSignature: [...new Set(types)].join(" | "),
+    // TODO: add other preprocessors
     autoResultPreprocessing: "await r.json()"
   };
 }
