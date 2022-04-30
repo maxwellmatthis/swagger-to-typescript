@@ -1,321 +1,316 @@
-import { OpenAPIv3, Operation, Server, Responses, XResponse, Schema, RequestBody } from "../openapi-v3";
-import { existsSync, readFileSync, } from "fs";
-import { extname } from "path";
-import { extensionIsSupported, schemaIsSupported } from "../index";
-import { load } from "js-yaml";
+import { OpenAPIv3, Operation, Responses, XResponse, Schema, RequestBody, PathItem, ReferenceObject } from "../types/openapi-v3";
+import { Blueprint, ConstantBlueprint, FunctionBlueprint, InterfaceBlueprint } from "../types/blueprint";
+import { safeVariableName, joinArguments, loadRef, filterDefined, isInternalJSONReference } from "../utils";
 
-export class Generator {
-  private schema: OpenAPIv3;
-
-  constructor(schema: OpenAPIv3) {
-    this.schema = schema;
-  }
-
-  /**
-   * @returns code made of individual accessor functions meant to be saved to a TypeScript module File
-   */
-  public generateTypedFunctions(): string {
-    let code: string = `
-export interface Res<Data> {
-  ok: boolean,
-  data?: Data,
-  networkError?: boolean;
-}
-
-const NETWORK_ERROR: Res<{ reason: string }> = {
-  ok: false,
-  data: { reason: "There was a network error. Please try again." },
-  networkError: true
-};
-\n`;
-
-    for (const pathName in this.schema.paths) {
-      let path = this.schema.paths[pathName];
-      if (path.$ref) path = this.loadRef(path.$ref);
-      const operations = {
-        get: path.get,
-        put: path.put,
-        post: path.post,
-        delete: path.delete,
-        options: path.options,
-        head: path.options,
-        patch: path.patch,
-        trace: path.trace,
-      };
-      for (const operationName of Object.keys(operations) as [keyof typeof operations]) {
-        const operation = path[operationName];
-        if (!operation) continue;
-        if (operation.deprecated) {
-          console.warn(`Skipping ${pathName}.${operationName} because it's maked as deprecated.`);
-          continue;
-        };
-        code += this.generateTypedFunction(pathName, path.servers?.[0] || this.schema.servers?.[0] || null, operationName, operation);
-      }
-    }
-
-    return code.trim();
-  }
-
-  /**
-   * @param pathName the url to the resource the operation is part of
-   * @param server an OpenAPI v3 `Server` object from which the operation can inherit the host
-   * @param operationName the name (method) of the operation
-   * @param operation the operation itself
-   * @returns a typed function to access a specific API resource
-   */
-  private generateTypedFunction(
-    pathName: string,
-    server: Server | null,
-    operationName: string,
-    operation: Operation
-  ): string {
-    const funcParams: string[] = [];
-    const fetchParams: string[] = [];
-
-    // Host
-    // TODO: parse pathName for path parameters
-    if (!server?.url) {
-      funcParams.push("host: string");
-      fetchParams.push(`\`${"${host}"}${pathName}\``);
-    } else fetchParams.push(`'${server.url}${pathName}'`);
-
-    // Fetch Request Options
-    const requestParams: string[] = [];
-    requestParams.push(`method: "${operationName.toUpperCase()}"`);
-    if (operation.requestBody) {
-      const rb: RequestBody | undefined = "$ref" in operation.requestBody
-        ? this.loadRef(operation.requestBody.$ref)
-        : operation.requestBody;
-
-      if (rb) {
-        const mediaType = Object.keys(rb.content)[0];
-        // TODO: add more media type support
-        if (mediaType.toLowerCase() === "application/json") {
-          const schema = rb.content[mediaType].schema;
-          funcParams.push(`body: ${schema ? this.schemaToTypescriptDefinition(schema) : "any"}`);
-          requestParams.push("body: JSON.stringify(body)", "headers: { \"Content-Type\": \"application/json\" }");
-        }
-        else console.error(`Media type "${mediaType}" is not supported`);
-      }
-    }
-    if (requestParams.length > 0) fetchParams.push("{" + joinArguments(requestParams, 30) + "}");
-
-    return composeAccessorFunction(
-      genJsDoc(pathName, operationName, operation.summary),
-      safeVariableName(operation.operationId || `${operationName}-${pathName}`),
-      funcParams,
-      fetchParams,
-      this.genReturnTypes(operation.responses)
-    );
-  }
-
-  /**
-   * @param responses an OpenAPI v3 `Responses` object to be parsed
-   * @returns string of TypeScript union type of valid API Responses
-   */
-  private genReturnTypes(responses: Responses) {
-    const types: string[] = [];
-
-    // For NETWORK_ERROR used at top of `generateTypedFunctions()`
-    // and second catch in `composeAccessorFunction()`
-    types.push("{ reason: string }");
-
-    for (const responseName of Object.keys(responses) as [keyof Responses]) {
-      let response = responses[responseName];
-      if (response) {
-        if ("$ref" in response) response = this.loadRef(response.$ref) as XResponse | undefined;
-
-        // TODO: add Header and Link types to response
-        if (response?.content) {
-          const mediaType = Object.keys(response.content)[0];
-          const schema = response.content[mediaType].schema;
-          if (schema) types.push(this.schemaToTypescriptDefinition(schema));
-          else {
-            console.warn(`${responseName}.content.${response.content[mediaType]} has no schema.`);
-            types.push("any");
-          }
-        }
-        else types.push("undefined");
-      }
-    }
-
-    return [...new Set(types)].join(" | ");
-  }
-
-  /**
-   * @param thing valid OpenAPI v3 `Schema` object
-   * @returns a valid TypeScript definition for the given schema
-   */
-  private schemaToTypescriptDefinition(thing: Schema): string {
-    if (thing) {
-      if ("$ref" in thing && thing.$ref) {
-        return this.schemaToTypescriptDefinition(this.loadRef(thing.$ref));
-      } else {
-        if (thing.type && ["string", "number", "boolean", "integer"].includes(thing.type)) return (thing.type === "integer" ? "number" : thing.type);
-        else if (thing.type === "object") {
-          let keys: string[] = [];
-          if (thing.properties) {
-            for (const key of Object.keys(thing.properties) as [keyof Schema]) {
-              keys.push(`${typeof key === "string" ? safeVariableName(key) : key}: ${this.schemaToTypescriptDefinition(thing.properties[key])}`);
-            }
-          }
-          if (thing.additionalProperties?.type) keys.push(`[key:string]: ${this.schemaToTypescriptDefinition(thing.additionalProperties)}`);
-          if (keys.length > 0) return `{ ${keys.join(", ")} }`;
-          else {
-            console.warn(`${JSON.stringify(thing)} has no properties`);
-            return "{}";
-          }
-        }
-        else if (thing.type === "array") {
-          if (thing.items) {
-            return `${this.schemaToTypescriptDefinition(thing.items)}[]`;
-          }
-          console.warn(`${JSON.stringify(thing)} has no items`);
-          return "[]";
-        }
-      }
-    }
-    console.warn(`${JSON.stringify(thing)} has no type`);
-    return "any";
+/**
+ * Creates a `Blueprint` from a schema
+ * @param schema the `OpenAPIv3` schema to use
+ * @returns the blueprint
+ */
+export function generateBlueprint(schema: OpenAPIv3, inline: boolean): Blueprint {
+  const constants: ConstantBlueprint[] = [];
+  return {
+    constants,
+    functions: generateFunctionBlueprints(schema, constants, inline),
+    interfaces: [resultInterface, ...inline ? [] : generateInterfaceBlueprints(schema)],
   };
-
-  /**
-   * loads a json reference
-   * @param ref valid json reference (__example:__ `file.json#/path/to/something`)
-   * @returns whatever the reference was pointing to or undefined, if the reference could not be loaded
-   */
-  private loadRef(ref: string): any {
-    const validRef = /^([\/A-Za-z0-9_\-\.\(\)]+)*#(\/[A-Za-z0-9_]+)*$/;
-    if (validRef.test(ref)) {
-      const pathParts = ref.split("/").slice(1);
-      if (ref.startsWith("#/")) return search(this.schema, pathParts);
-      else {
-        const filePath = ref.split("#")[0];
-        const extension = extname(filePath);
-        if (!extensionIsSupported(extension)) throw new Error(`Extension "${extension}" is not supported.`);
-        else if (!existsSync(filePath)) throw new Error(`File "${filePath}}" does not exist.`);
-        else {
-          const contents = readFileSync(filePath, { encoding: "utf-8" });
-          const schema: OpenAPIv3 = extension === ".json" ? JSON.parse(contents) : load(contents);
-          if (!schemaIsSupported(schema)) throw new Error(`Schema in "${filePath}" not supported. This tool only works with OpenAPI v3.`);
-          else return search(schema, pathParts);
-        }
-      }
-    }
-    else {
-      console.error(`Invalid reference: ${ref}`);
-      return undefined;
-    }
-
-    /**
-     * searches an object of objects recursivly until its location matches the path
-     * @param object some object to be searched
-     * @param remainingPath the remaining keys to be searched
-     * @returns whatever the reference was pointing to or undefined, if the reference could not be loaded
-     */
-    function search(object: object, remainingPath: string[]): any | undefined {
-      for (const key of Object.keys(object) as [keyof typeof object]) {
-        if (key === remainingPath[0]) {
-          const currentObject = object[key];
-          remainingPath.shift();
-          if (remainingPath.length === 0) return currentObject;
-          else return search(currentObject, remainingPath);
-        }
-      }
-      console.error(`Unable to load reference ${ref}`);
-      return undefined;
-    };
-  }
 }
 
 /**
- * @param jsDoc a jsDoc about the function
- * @param name a valid JavaScript function name
- * @param funcParams an array of named parameters of the function
- * @param fetchParams an array of unnamed parameters to be used as arguments of the `window.fetch()` function
- * @param returnSignature a valid TypeScript type that is returned after parsing the APIs response
- * @returns a fully ready accessor function as a string
+ * The standard result interface for describing the return signature of an accessor function
+ * 
+ * This interface must always be included in the generated source code because
+ * it is used in every generated function
  */
-function composeAccessorFunction(
-  jsDoc: string,
-  name: string,
-  funcParams: string[],
-  fetchParams: string[],
-  returnSignature: string
-): string {
-  // TODO: add a different way of deserializing other than `await r.json()` for non-json data
-  return `${jsDoc}
-export async function ${name}(${joinArguments(funcParams, 40)}): Promise<Res<${returnSignature}>> {
-  try {
-    const r = await fetch(${joinArguments(fetchParams, 60, 4, 2)});
-    try {
-      return { ok: r.ok, data: await r.json() };
-    } catch (e) {
-      return { ok: r.ok };
-    }
-  } catch (e) {
-    console.error(e);
-    return NETWORK_ERROR;
-  }
-}\n\n`;
+const resultInterface: InterfaceBlueprint = {
+  name: "Res<Data>",
+  schema: `{ ok: boolean, data?: Data, networkError?: boolean }`,
+  jsDocLines: ["The result of an accessor function"]
 };
 
 /**
- * @param pathName of the operation
- * @param summary of the operation
- * @returns a simple jsDoc for an operation
+ * Creates all the `InterfaceBlueprints`s from a schema
+ * @param schema the `OpenAPIv3` schema to use
+ * @returns the blueprints
  */
-function genJsDoc(
+function generateInterfaceBlueprints(schema: OpenAPIv3): InterfaceBlueprint[] {
+  const interfaces: InterfaceBlueprint[] = [];
+  if (schema.components && schema.components.schemas) {
+    for (const [schemaName, JSONSchema] of Object.entries(schema.components.schemas)) {
+      interfaces.push({
+        name: safeVariableName(schemaName),
+        schema: schemaToTypescriptDefinition(schema, JSONSchema, false),
+        jsDocLines: []
+      });
+    }
+  }
+  return interfaces;
+}
+
+type ServerDetails = { type: "main" | "scoped", url: string, variable?: string, description?: string; } | { type: "param"; };
+
+/**
+ * Creates all the `FunctionBlueprint`s from the schema
+ * @param schema the `OpenAPIv3` schema to use
+ * @returns the blueprints
+ */
+function generateFunctionBlueprints(schema: OpenAPIv3, constants: ConstantBlueprint[], inline: boolean): FunctionBlueprint[] {
+  const functions: FunctionBlueprint[] = [];
+
+  if (typeof schema.servers === "object" && schema.servers.length > 1) {
+    console.warn("Multiple main servers detected in `#/servers`."
+      + "The first one will be used as default for all routes. The other servers will be ignored.");
+  }
+  const globalScopeServer: ServerDetails = schema.servers?.[0].url
+    ? inline
+      ? { type: "main", url: schema.servers[0].url, }
+      : { type: "main", url: schema.servers[0].url, description: schema.servers[0].description, variable: "mainServer" }
+    : { type: "param" };
+
+  for (const [pathName, path] of Object.entries(schema.paths)) {
+    // resolve $ref if needed
+    if (path.$ref) Object.assign(path, loadRef(schema, path.$ref));
+
+    if (typeof path.servers === "object" && path.servers.length > 1) {
+      console.warn(`Multiple main servers detected in \`#/paths${pathName}/servers\`. `
+        + "The first one will be used as default for all methods. The other servers will be ignored.");
+    }
+    const pathScopeServer: ServerDetails = path.servers?.[0].url
+      ? inline
+        ? { type: "scoped", url: path.servers[0].url }
+        : { type: "scoped", url: path.servers[0].url, variable: safeVariableName(pathName) + "Server" }
+      : globalScopeServer;
+
+    // Only add the constant if needed
+    if ((pathScopeServer.type === "main" || pathScopeServer.type === "scoped") &&
+      pathScopeServer.variable &&
+      !constants.some((c) => c.name === pathScopeServer.variable)) {
+      constants.push({
+        name: pathScopeServer.variable,
+        type: "string",
+        value: `"${pathScopeServer.url}"`,
+        jsDocLines: filterDefined(pathScopeServer.description)
+      });
+    }
+
+    for (const [operationName, operation] of Object.entries(extractOperations(path))) {
+      if (!operation) continue;
+      if (operation.deprecated) {
+        console.warn(`Skipping \`#/paths${pathName}/${operationName}\` because it's marked as deprecated.`);
+        continue;
+      };
+
+      functions.push(generateFunctionBlueprint(
+        schema,
+        inline,
+        pathName,
+        operationName,
+        operation,
+        pathScopeServer
+      ));
+    }
+  }
+
+  return functions;
+}
+
+/**
+ * Isolates the operations of a given path
+ * @param path a valid `OpenAPIv3` `PathItem` object
+ * @returns an object of operations
+ */
+function extractOperations(path: PathItem) {
+  return {
+    get: path.get,
+    put: path.put,
+    post: path.post,
+    delete: path.delete,
+    options: path.options,
+    head: path.options,
+    patch: path.patch,
+    trace: path.trace,
+  };
+}
+
+/**
+ * Generates a `FunctionBlueprint` for a certain operation
+ * @param schema the `OpenAPIv3` schema to use
+ * @param pathName the URL pathname (`/path/to/resource`)
+ * @param operationName the HTTP operation (`GET`, `POST`, etc.)
+ * @param operation the details of the operation
+ * @param server the details of the server that the request is aimed at
+ * @returns the blueprint
+ */
+function generateFunctionBlueprint(
+  schema: OpenAPIv3,
+  inline: boolean,
   pathName: string,
   operationName: string,
-  summary?: string,
-): string {
-  const lines: string[] = [];
-  lines.push(`@route ${operationName.toUpperCase()} \`${pathName}\``);
-  if (summary) lines.push(summary);
-  // for (const param of params) {
-  //   if (param.deprecated) {
-  //     console.warn(`Skipping param ${param.name} because it's deprecated.`);
-  //     continue;
-  //   }
-  //   if (param.description) lines.push(`@param ${param.name} ${param.description}`);
-  // }
-  // if (requestBody?.description) lines.push(`@param body ${requestBody.description}`);
-  lines.push("@returns `Promise` of possible API responses");
-  return `/**\n * ${lines.join("\n * ")}\n*/`;
-}
+  operation: Operation,
+  server: ServerDetails,
+): FunctionBlueprint {
+  const { funcParams, fetchParams } = requestHandler(schema, inline, pathName, operationName, operation, server);
+  const { responseSignature, autoResultPreprocessing } = responseHandler(schema, inline, operation.responses);
 
-/**
- * @returns string that can be safely used as a variable name in JavaScript
- * 
- * Example: `hello-world` becomes `helloWorld`
- */
-function safeVariableName(context: string): string {
-  const allowed = /[A-Za-z0-9_$]/;
-  return context
-    .split("")
-    .reverse()
-    .map((char, index, parts) => char.match(allowed)
-      ? (index + 1 < parts.length && !parts.slice(index + 1, index + 2)[0].match(allowed))
-        ? char.toUpperCase()
-        : char
-      : ""
+  return {
+    name: safeVariableName(operation.operationId || `${operationName}-${pathName}`),
+    funcParams,
+    responseSignature,
+    fetchParams,
+    autoResultPreprocessing,
+    jsDocLines: filterDefined(
+      `@route ${operationName.toUpperCase()} \`${pathName}\``,
+      operation.summary,
+      "@returns `Promise` of possible API responses"
     )
-    .reverse()
-    .join("");
+  };
 }
 
 /**
- * @param params raw strings that may be used as function arguments
- * @param maxLength maximum length
- * @returns a joined and correctly indented string to be used as a parameter for a function
+ * Provides the parameters for the function and the fetch function call wrapped within
+ * @param schema the `OpenAPIv3` schema to use
+ * @param pathName the URL pathname (`/path/to/resource`)
+ * @param operationName the HTTP operation (`GET`, `POST`, etc.)
+ * @param operation the details of the operation
+ * @param server the details of the server that the request is aimed at
+ * @returns the parameters for both functions
  */
-function joinArguments(args: string[], maxLength: number = 60, baseIndentSize: number = 0, indentSize: number = 2) {
-  maxLength = Math.abs(maxLength);
-  baseIndentSize = Math.abs(baseIndentSize);
-  indentSize = Math.abs(indentSize);
-  const indent = " ".repeat(indentSize + baseIndentSize);
-  return args.join(", ").length > maxLength || args.some((arg) => arg.includes("\n"))
-    ? "\n" + indent + args.map((arg) => arg.split("\n").join("\n" + indent)).join(",\n" + indent) + "\n" + " ".repeat(baseIndentSize)
-    : args.join(", ");
+function requestHandler(
+  schema: OpenAPIv3,
+  inline: boolean,
+  pathName: string,
+  operationName: string,
+  operation: Operation,
+  server: ServerDetails
+): {
+  funcParams: string[],
+  fetchParams: string[],
+} {
+  const funcParams: string[] = [];
+  const fetchParams: string[] = [];
+
+  // Host
+  // TODO: parse pathName for path parameters
+  if (server.type === "main" || server.type === "scoped") {
+    if (server.variable) fetchParams.push(`\`\${${server.variable}}${pathName}\``);
+    else fetchParams.push(`"${server.url}${pathName}"`);
+  } else {
+    funcParams.push("host: string");
+    fetchParams.push(`\`\${host}"${pathName}\``);
+  }
+
+  // Request data
+  const requestParams: string[] = [];
+  requestParams.push(`method: "${operationName.toUpperCase()}"`);
+  if (operation.requestBody) {
+    const rb: RequestBody | undefined = "$ref" in operation.requestBody
+      ? loadRef(schema, operation.requestBody.$ref)
+      : operation.requestBody;
+
+    if (rb) {
+      const mediaType = Object.keys(rb.content)[0];
+      // TODO: add more media type support
+      if (mediaType.toLowerCase() === "application/json") {
+        funcParams.push(`body: ${schemaToTypescriptDefinition(schema, rb.content[mediaType].schema, inline)}`);
+        requestParams.push("body: JSON.stringify(body)", "headers: { \"Content-Type\": \"application/json\" }");
+      }
+      else console.error(`Media type "${mediaType}" is not supported`);
+    }
+  }
+  if (requestParams.length > 0) fetchParams.push("{" + joinArguments(requestParams, 30) + "}");
+
+  return { funcParams, fetchParams };
 }
+
+/**
+ * Provides a reponse signature and if possible steps to process the raw data
+ * to achive the response signature
+ * @param schema the `OpenAPIv3` schema to use
+ * @param inline if as much as possible should be inlined
+ * @param responses the possible `Responses` of a certain `Operation`
+ * @returns the response signature as a TypeScript union type and steps for automatic preprocessing
+ */
+function responseHandler(schema: OpenAPIv3, inline: boolean, responses: Responses): {
+  responseSignature: string,
+  autoResultPreprocessing: string,
+} {
+  const types: string[] = [];
+
+  for (let [responseName, response] of Object.entries(responses)) {
+    if (response) {
+      if ("$ref" in response) response = loadRef(schema, response.$ref) as XResponse | undefined;
+
+      // TODO: add Header and Link types to response
+      if (response?.content) {
+        const mediaType = Object.keys(response.content)[0];
+        if (!response.content[mediaType].schema)
+          console.warn(`${responseName}.content.${response.content[mediaType]} has no schema.`);
+        types.push(schemaToTypescriptDefinition(schema, response.content[mediaType].schema, inline));
+      }
+      else types.push("undefined");
+    }
+  }
+
+  return {
+    responseSignature: [...new Set(types)].join(" | "),
+    autoResultPreprocessing: "await r.json()"
+  };
+}
+
+/**
+ * Turns the (slightly modiefied OpenAPIv3) JSON schemas into TypeScript types
+ * @param schema the `OpenAPIv3` schema to use
+ * @param thing a valid `OpenAPIv3` `Schema` object
+ * @param inline if as much as possible should be inlined
+ * @returns the TypeScript definition for the given schema
+ */
+function schemaToTypescriptDefinition(
+  schema: OpenAPIv3,
+  thing: Schema | ReferenceObject | undefined,
+  inline: boolean): string {
+  if (thing) {
+    if (thing.$ref) {
+      if (inline) return schemaToTypescriptDefinition(schema, loadRef(schema, thing.$ref), inline);
+      else {
+        const parts = thing.$ref.split("/");
+        const lastPart = parts[parts.length - 1];
+        // add external JSON schemas to the current schema so that they are transformed in the interface blueprint step
+        if (!isInternalJSONReference(thing.$ref)) {
+          if (!schema.components) schema.components = {};
+          if (!schema.components.schemas) schema.components.schemas = {};
+          // try to find an available identifier to save the schema as
+          for (let i = 0; i < 1000; i++) {
+            const identifier = lastPart + (i === 0 ? "" : i.toString());
+            if (!schema.components.schemas[identifier]) schema.components.schemas[identifier] = loadRef(schema, thing.$ref);
+          }
+        }
+        return safeVariableName(lastPart);
+      }
+    } else {
+      if ("type" in thing && thing.type && ["string", "number", "boolean", "integer"].includes(thing.type)) {
+        return (thing.type === "integer" ? "number" : thing.type);
+      } else if ("type" in thing && thing.type === "object") {
+        let keys: string[] = [];
+        if (thing.properties) {
+          for (const key of Object.keys(thing.properties) as [keyof Schema]) {
+            keys.push(`${typeof key === "string" ? safeVariableName(key) : key}: ${schemaToTypescriptDefinition(schema, thing.properties[key], inline)}`);
+          }
+        }
+        if (thing.additionalProperties?.type) keys.push(`[key:string]: ${schemaToTypescriptDefinition(schema, thing.additionalProperties, inline)}`);
+        if (keys.length > 0) return `{ ${keys.join(", ")} }`;
+        else {
+          console.warn(`${JSON.stringify(thing)} has no properties`);
+          return "{}";
+        }
+      } else if ("type" in thing && thing.type === "array") {
+        if (thing.items) {
+          return `${schemaToTypescriptDefinition(schema, thing.items, inline)}[]`;
+        }
+        console.warn(`${JSON.stringify(thing)} has no items`);
+        return "[]";
+      }
+    }
+  }
+  console.warn(`${JSON.stringify(thing)} has no type`);
+  return "any";
+};
