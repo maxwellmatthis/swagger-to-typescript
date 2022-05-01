@@ -1,4 +1,4 @@
-# swagger-to-typed-requests
+# swagger-to-typescript
 
 ## About
 
