@@ -1,8 +1,9 @@
 import { ConstantBlueprint, FunctionBlueprint, InterfaceBlueprint } from "./types/blueprint";
-import { joinArguments } from "./utils";
+import { Indent, joinArguments, d } from "./utils";
 
 /**
  * Composes a simple jsDoc for something
+ * @param lines the individual lines of the jsDoc
  * @returns the jsDoc as a string
  */
 export function composeJsDoc(lines: string[]): string {
@@ -32,20 +33,20 @@ export function composeConstant(blueprint: ConstantBlueprint) {
 /**
  * Composes a function that offers type safe access to an API endpoint
  * @param blueprint the blueprint
+ * @param indent the indent
  * @returns the function as a string
  */
-// TODO: add a different way of deserializing other than `await r.json()` for non-json data
-export const composeAccessorFunction = (blueprint: FunctionBlueprint): string =>
-  `${composeJsDoc(blueprint.jsDocLines)}export async function ${blueprint.name}(${joinArguments(blueprint.funcParams, 40)}): Promise<Res<${blueprint.responseSignature}>> {
-  try {
-    const r = await fetch(${joinArguments(blueprint.fetchParams, 60, 4, 2)});
-    try {
-      return { ok: r.ok, data: ${blueprint.autoResultPreprocessing} };
-    } catch (e) {
-      return { ok: r.ok };
-    }
-  } catch (e) {
-    console.error(e);
-    return { ok: false, networkError: true };
-  }
+export const composeAccessorFunction = (blueprint: FunctionBlueprint, indent?: Indent): string =>
+  `${composeJsDoc(blueprint.jsDocLines)}export async function ${blueprint.name}(${joinArguments(blueprint.funcParams, 40, 0, indent)}): Promise<Res<${blueprint.responseSignature}>> {
+${d(indent, 1)}try {
+${d(indent, 2)}const r = await fetch(${joinArguments(blueprint.fetchParams, 60, 2, indent)});
+${d(indent, 2)}try {
+${d(indent, 3)}return { ok: r.ok, data: ${blueprint.autoResultPreprocessing} };
+${d(indent, 2)}} catch (e) {
+${d(indent, 3)}return { ok: r.ok };
+${d(indent, 2)}}
+${d(indent, 1)}} catch (e) {
+${d(indent, 2)}console.error(e);
+${d(indent, 2)}return { ok: false, networkError: true };
+${d(indent, 1)}}
 }`;

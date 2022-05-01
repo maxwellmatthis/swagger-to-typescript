@@ -72,27 +72,48 @@ export function pathToTemplateLiteral(path: string, varPrefix?: string): {
   };
 }
 
+export interface Indent {
+  size: number,
+  type: "space" | "tab",
+}
+
 /**
  * Joins arguments in a formatted way to be used in a function
  * @param args raw strings that may be used as function arguments (__for example__: `name: string`)
  * @param maxLength maximum length of a line before it is reformatted to span multiple lines
- * @param baseIndentSize the amount of spaces that the code is already indented
+ * @param baseIndentSize the amount of indents that the code is already indented
+ * @param indent.size the amount of indents to add with each level
+ * @param indent.type the type of indent
  * @returns the joined and formatted parameters
  */
 export function joinArguments(
   args: string[],
   maxLength: number = 60,
   baseIndentSize: number = 0,
-  indentSize: number = 2
+  indent: Indent | undefined
 ): string {
   maxLength = Math.abs(maxLength);
   baseIndentSize = Math.abs(baseIndentSize);
-  indentSize = Math.abs(indentSize);
-  const indent = " ".repeat(indentSize + baseIndentSize);
+
+  const regularDent = d(indent, baseIndentSize + 1);
+  const baseDent = d(indent, baseIndentSize);
+
   const simpleJoin = args.join(", ");
-  return simpleJoin.length > maxLength || args.some((arg) => arg.includes("\n"))
-    ? "\n" + indent + args.map((arg) => arg.split("\n").join("\n" + indent)).join(",\n" + indent) + "\n" + " ".repeat(baseIndentSize)
-    : simpleJoin;
+  if (simpleJoin.length > maxLength || args.some((arg) => arg.includes("\n"))) {
+    return "\n" + regularDent + args.map((arg) => arg.split("\n").join("\n" + regularDent)).join(",\n" + regularDent) + "\n" + baseDent;
+  } else {
+    return simpleJoin;
+  }
+}
+
+/**
+ * Creates the actual indent from an `Indent`
+ * @param indent the indent
+ * @param reps how often the indent of size `indent.size` is repreated
+ * @return the indent as a string
+ */
+export function d(indent: Indent = { size: 2, type: "space" }, reps: number): string {
+  return (indent.type === "space" ? " " : "\t").repeat(Math.abs(indent.size) * reps);
 }
 
 /**
@@ -106,6 +127,7 @@ export function filterDefined<T>(...elems: (T | undefined)[]) {
 
 /**
  * Loads a JSON reference
+ * @param schema the schema that contains the reference if the reference is internal
  * @param ref valid JSON reference (__for example:__ `file.json#/path/to/something`)
  * @returns whatever the reference was pointing to or undefined, if the reference could not be loaded
  */

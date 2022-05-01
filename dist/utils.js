@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isInternalJSONReference = exports.loadRef = exports.filterDefined = exports.joinArguments = exports.pathToTemplateLiteral = exports.safeVariableName = exports.schemaIsSupported = exports.extensionIsSupported = void 0;
+exports.isInternalJSONReference = exports.loadRef = exports.filterDefined = exports.d = exports.joinArguments = exports.pathToTemplateLiteral = exports.safeVariableName = exports.schemaIsSupported = exports.extensionIsSupported = void 0;
 const fs_1 = require("fs");
 const path_1 = require("path");
 const js_yaml_1 = require("js-yaml");
@@ -75,20 +75,35 @@ exports.pathToTemplateLiteral = pathToTemplateLiteral;
  * Joins arguments in a formatted way to be used in a function
  * @param args raw strings that may be used as function arguments (__for example__: `name: string`)
  * @param maxLength maximum length of a line before it is reformatted to span multiple lines
- * @param baseIndentSize the amount of spaces that the code is already indented
+ * @param baseIndentSize the amount of indents that the code is already indented
+ * @param indent.size the amount of indents to add with each level
+ * @param indent.type the type of indent
  * @returns the joined and formatted parameters
  */
-function joinArguments(args, maxLength = 60, baseIndentSize = 0, indentSize = 2) {
+function joinArguments(args, maxLength = 60, baseIndentSize = 0, indent) {
     maxLength = Math.abs(maxLength);
     baseIndentSize = Math.abs(baseIndentSize);
-    indentSize = Math.abs(indentSize);
-    const indent = " ".repeat(indentSize + baseIndentSize);
+    const regularDent = d(indent, baseIndentSize + 1);
+    const baseDent = d(indent, baseIndentSize);
     const simpleJoin = args.join(", ");
-    return simpleJoin.length > maxLength || args.some((arg) => arg.includes("\n"))
-        ? "\n" + indent + args.map((arg) => arg.split("\n").join("\n" + indent)).join(",\n" + indent) + "\n" + " ".repeat(baseIndentSize)
-        : simpleJoin;
+    if (simpleJoin.length > maxLength || args.some((arg) => arg.includes("\n"))) {
+        return "\n" + regularDent + args.map((arg) => arg.split("\n").join("\n" + regularDent)).join(",\n" + regularDent) + "\n" + baseDent;
+    }
+    else {
+        return simpleJoin;
+    }
 }
 exports.joinArguments = joinArguments;
+/**
+ * Creates the actual indent from an `Indent`
+ * @param indent the indent
+ * @param reps how often the indent of size `indent.size` is repreated
+ * @return the indent as a string
+ */
+function d(indent = { size: 2, type: "space" }, reps) {
+    return (indent.type === "space" ? " " : "\t").repeat(Math.abs(indent.size) * reps);
+}
+exports.d = d;
 /**
  * Removes the `undefined` elements from an array
  * @param elems Some elements of type `<T>` and `undefined`
@@ -100,6 +115,7 @@ function filterDefined(...elems) {
 exports.filterDefined = filterDefined;
 /**
  * Loads a JSON reference
+ * @param schema the schema that contains the reference if the reference is internal
  * @param ref valid JSON reference (__for example:__ `file.json#/path/to/something`)
  * @returns whatever the reference was pointing to or undefined, if the reference could not be loaded
  */

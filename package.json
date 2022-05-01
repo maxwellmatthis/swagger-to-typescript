@@ -1,6 +1,6 @@
 {
   "name": "swagger-to-typed-requests",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "start": "echo Please run this program directly using 'node dist/index.js'",
     "build": "tsc",

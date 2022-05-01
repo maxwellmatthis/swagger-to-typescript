@@ -4,6 +4,7 @@ exports.composeAccessorFunction = exports.composeConstant = exports.composeInter
 const utils_1 = require("./utils");
 /**
  * Composes a simple jsDoc for something
+ * @param lines the individual lines of the jsDoc
  * @returns the jsDoc as a string
  */
 function composeJsDoc(lines) {
@@ -37,21 +38,21 @@ exports.composeConstant = composeConstant;
 /**
  * Composes a function that offers type safe access to an API endpoint
  * @param blueprint the blueprint
+ * @param indent the indent
  * @returns the function as a string
  */
-// TODO: add a different way of deserializing other than `await r.json()` for non-json data
-const composeAccessorFunction = (blueprint) => `${composeJsDoc(blueprint.jsDocLines)}export async function ${blueprint.name}(${(0, utils_1.joinArguments)(blueprint.funcParams, 40)}): Promise<Res<${blueprint.responseSignature}>> {
-  try {
-    const r = await fetch(${(0, utils_1.joinArguments)(blueprint.fetchParams, 60, 4, 2)});
-    try {
-      return { ok: r.ok, data: ${blueprint.autoResultPreprocessing} };
-    } catch (e) {
-      return { ok: r.ok };
-    }
-  } catch (e) {
-    console.error(e);
-    return { ok: false, networkError: true };
-  }
+const composeAccessorFunction = (blueprint, indent) => `${composeJsDoc(blueprint.jsDocLines)}export async function ${blueprint.name}(${(0, utils_1.joinArguments)(blueprint.funcParams, 40, 0, indent)}): Promise<Res<${blueprint.responseSignature}>> {
+${(0, utils_1.d)(indent, 1)}try {
+${(0, utils_1.d)(indent, 2)}const r = await fetch(${(0, utils_1.joinArguments)(blueprint.fetchParams, 60, 2, indent)});
+${(0, utils_1.d)(indent, 2)}try {
+${(0, utils_1.d)(indent, 3)}return { ok: r.ok, data: ${blueprint.autoResultPreprocessing} };
+${(0, utils_1.d)(indent, 2)}} catch (e) {
+${(0, utils_1.d)(indent, 3)}return { ok: r.ok };
+${(0, utils_1.d)(indent, 2)}}
+${(0, utils_1.d)(indent, 1)}} catch (e) {
+${(0, utils_1.d)(indent, 2)}console.error(e);
+${(0, utils_1.d)(indent, 2)}return { ok: false, networkError: true };
+${(0, utils_1.d)(indent, 1)}}
 }`;
 exports.composeAccessorFunction = composeAccessorFunction;
 //# sourceMappingURL=compose.js.map

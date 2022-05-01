@@ -5,13 +5,15 @@ const utils_1 = require("../utils");
 /**
  * Creates a `Blueprint` from a schema
  * @param schema the `OpenAPIv3` schema to use
+ * @param inline if as many things as possible should be inlined
+ * @param indent the indent
  * @returns the blueprint
  */
-function generateBlueprint(schema, inline) {
+function generateBlueprint(schema, inline, indent) {
     const constants = [];
     return {
         constants,
-        functions: generateFunctionBlueprints(schema, constants, inline),
+        functions: generateFunctionBlueprints(schema, constants, inline, indent),
         interfaces: [resultInterface, ...inline ? [] : generateInterfaceBlueprints(schema)],
     };
 }
@@ -22,6 +24,7 @@ exports.generateBlueprint = generateBlueprint;
  * This interface must always be included in the generated source code because
  * it is used in every generated function
  */
+// TODO: maybe make this inlineable too?
 const resultInterface = {
     name: "Res<Data>",
     schema: `{ ok: boolean, data?: Data, networkError?: boolean }`,
@@ -38,7 +41,7 @@ function generateInterfaceBlueprints(schema) {
         for (const [schemaName, JSONSchema] of Object.entries(schema.components.schemas)) {
             interfaces.push({
                 name: (0, utils_1.safeVariableName)(schemaName),
-                schema: schemaToTypescriptDefinition(schema, JSONSchema, false),
+                schema: schemaToTypescriptDefinition(JSONSchema, false, schema),
                 jsDocLines: []
             });
         }
@@ -48,9 +51,12 @@ function generateInterfaceBlueprints(schema) {
 /**
  * Creates all the `FunctionBlueprint`s from the schema
  * @param schema the `OpenAPIv3` schema to use
+ * @param constants a reference to the `ConstantBlueprint` array
+ * @param inline if as many things as possible should be inlined
+ * @param indent the indent
  * @returns the blueprints
  */
-function generateFunctionBlueprints(schema, constants, inline) {
+function generateFunctionBlueprints(schema, constants, inline, indent) {
     var _a, _b;
     const functions = [];
     if (typeof schema.servers === "object" && schema.servers.length > 1) {
@@ -94,7 +100,7 @@ function generateFunctionBlueprints(schema, constants, inline) {
                 continue;
             }
             ;
-            functions.push(generateFunctionBlueprint(schema, inline, pathName, operationName, operation, pathScopeServer));
+            functions.push(generateFunctionBlueprint(schema, inline, indent, pathName, operationName, operation, pathScopeServer));
         }
     }
     return functions;
@@ -119,14 +125,16 @@ function extractOperations(path) {
 /**
  * Generates a `FunctionBlueprint` for a certain operation
  * @param schema the `OpenAPIv3` schema to use
+ * @param inline if as many things as possible should be inlined
+ * @param indent the indent
  * @param pathName the URL pathname (`/path/to/resource`)
  * @param operationName the HTTP operation (`GET`, `POST`, etc.)
  * @param operation the details of the operation
  * @param server the details of the server that the request is aimed at
  * @returns the blueprint
  */
-function generateFunctionBlueprint(schema, inline, pathName, operationName, operation, server) {
-    const { funcParams, fetchParams } = requestHandler(schema, inline, pathName, operationName, operation, server);
+function generateFunctionBlueprint(schema, inline, indent, pathName, operationName, operation, server) {
+    const { funcParams, fetchParams } = requestHandler(schema, inline, indent, pathName, operationName, operation, server);
     const { responseSignature, autoResultPreprocessing } = responseHandler(schema, inline, operation.responses);
     return {
         name: (0, utils_1.safeVariableName)(operation.operationId || `${operationName}-${pathName}`),
@@ -140,19 +148,21 @@ function generateFunctionBlueprint(schema, inline, pathName, operationName, oper
 /**
  * Provides the parameters for the function and the fetch function call wrapped within
  * @param schema the `OpenAPIv3` schema to use
+ * @param inline if as many things as possible should be inlined
+ * @param indent the indent
  * @param pathName the URL pathname (`/path/to/resource`)
  * @param operationName the HTTP operation (`GET`, `POST`, etc.)
  * @param operation the details of the operation
  * @param server the details of the server that the request is aimed at
  * @returns the parameters for both functions
  */
-function requestHandler(schema, inline, pathName, operationName, operation, server) {
+function requestHandler(schema, inline, indent, pathName, operationName, operation, server) {
     const funcParams = [];
     const fetchParams = [];
     // Host
     const { templateLiteral, variables } = (0, utils_1.pathToTemplateLiteral)(pathName, "path.");
     if (variables.length > 0)
-        funcParams.push(`path: { ${(0, utils_1.joinArguments)(variables.map((v) => v + ": string"))} }`);
+        funcParams.push(`path: { ${(0, utils_1.joinArguments)(variables.map((v) => v + ": string"), undefined, undefined, indent)} }`);
     if (server.type === "main" || server.type === "scoped") {
         if (server.variable)
             fetchParams.push(`\`\${${server.variable}}${templateLiteral}\``);
@@ -174,7 +184,7 @@ function requestHandler(schema, inline, pathName, operationName, operation, serv
             const mediaType = Object.keys(rb.content)[0];
             // TODO: add more media type support
             if (mediaType.toLowerCase() === "application/json") {
-                funcParams.push(`body: ${schemaToTypescriptDefinition(schema, rb.content[mediaType].schema, inline)}`);
+                funcParams.push(`body: ${schemaToTypescriptDefinition(rb.content[mediaType].schema, inline, schema)}`);
                 requestParams.push("body: JSON.stringify(body)", "headers: { \"Content-Type\": \"application/json\" }");
             }
             else
@@ -182,14 +192,14 @@ function requestHandler(schema, inline, pathName, operationName, operation, serv
         }
     }
     if (requestParams.length > 0)
-        fetchParams.push("{" + (0, utils_1.joinArguments)(requestParams, 30) + "}");
+        fetchParams.push("{" + (0, utils_1.joinArguments)(requestParams, 30, undefined, indent) + "}");
     return { funcParams, fetchParams };
 }
 /**
  * Provides a reponse signature and if possible steps to process the raw data
  * to achive the response signature
  * @param schema the `OpenAPIv3` schema to use
- * @param inline if as much as possible should be inlined
+ * @param inline if as many things as possible should be inlined
  * @param responses the possible `Responses` of a certain `Operation`
  * @returns the response signature as a TypeScript union type and steps for automatic preprocessing
  */
@@ -204,7 +214,7 @@ function responseHandler(schema, inline, responses) {
                 const mediaType = Object.keys(response.content)[0];
                 if (!response.content[mediaType].schema)
                     console.warn(`${responseName}.content.${response.content[mediaType]} has no schema.`);
-                types.push(schemaToTypescriptDefinition(schema, response.content[mediaType].schema, inline));
+                types.push(schemaToTypescriptDefinition(response.content[mediaType].schema, inline, schema));
             }
             else
                 types.push("undefined");
@@ -218,17 +228,22 @@ function responseHandler(schema, inline, responses) {
 }
 /**
  * Turns the (slightly modiefied OpenAPIv3) JSON schemas into TypeScript types
- * @param schema the `OpenAPIv3` schema to use
  * @param thing a valid `OpenAPIv3` `Schema` object
- * @param inline if as much as possible should be inlined
+ * @param inline if as many things as possible should be inlined
+ * @param schema the `OpenAPIv3` schema to use
  * @returns the TypeScript definition for the given schema
  */
-function schemaToTypescriptDefinition(schema, thing, inline) {
+function schemaToTypescriptDefinition(thing, inline, schema) {
     var _a;
     if (thing) {
         if (thing.$ref) {
+            if (!schema) {
+                // technically its not required in non-inline mode when the reference is internal but its good to have it
+                console.warn("A schema is required for objects that include `$ref`s");
+                return "any";
+            }
             if (inline)
-                return schemaToTypescriptDefinition(schema, (0, utils_1.loadRef)(schema, thing.$ref), inline);
+                return schemaToTypescriptDefinition((0, utils_1.loadRef)(schema, thing.$ref), inline, schema);
             else {
                 const parts = thing.$ref.split("/");
                 const lastPart = parts[parts.length - 1];
@@ -256,11 +271,11 @@ function schemaToTypescriptDefinition(schema, thing, inline) {
                 let keys = [];
                 if (thing.properties) {
                     for (const key of Object.keys(thing.properties)) {
-                        keys.push(`${typeof key === "string" ? (0, utils_1.safeVariableName)(key) : key}: ${schemaToTypescriptDefinition(schema, thing.properties[key], inline)}`);
+                        keys.push(`${typeof key === "string" ? (0, utils_1.safeVariableName)(key) : key}: ${schemaToTypescriptDefinition(thing.properties[key], inline, schema)}`);
                     }
                 }
                 if ((_a = thing.additionalProperties) === null || _a === void 0 ? void 0 : _a.type)
-                    keys.push(`[key:string]: ${schemaToTypescriptDefinition(schema, thing.additionalProperties, inline)}`);
+                    keys.push(`[key:string]: ${schemaToTypescriptDefinition(thing.additionalProperties, inline, schema)}`);
                 if (keys.length > 0)
                     return `{ ${keys.join(", ")} }`;
                 else {
@@ -270,7 +285,7 @@ function schemaToTypescriptDefinition(schema, thing, inline) {
             }
             else if ("type" in thing && thing.type === "array") {
                 if (thing.items) {
-                    return `${schemaToTypescriptDefinition(schema, thing.items, inline)}[]`;
+                    return `${schemaToTypescriptDefinition(thing.items, inline, schema)}[]`;
                 }
                 console.warn(`${JSON.stringify(thing)} has no items`);
                 return "[]";
