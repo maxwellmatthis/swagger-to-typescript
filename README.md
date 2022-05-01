@@ -10,11 +10,11 @@ I looked around for a while but couldn't find a tool that gave me clean, native 
 
 ### Options
 
-- -s, --source <path-to-openapi-file>  The path to the openapi/swagger file that you want to convert to requests
-- -o, --output <path-to-api-file>      The path to the Typescript file that will contain the typed requests (default: "./api.ts")
-- -i, --inline                         If as many things as possible should be inlined or may be spread out over different interfaces and constants
-- -d, --dent <indent> <tab/t/space/s>  The amount of spaces or tabs with which to indent
-- -h, --help                           Display help for command
+- -s, --source &lt;path-to-openapi-file&gt;  The path to the openapi/swagger file that you want to convert to requests
+- -o, --output &lt;path-to-api-file&gt;      The path to the Typescript file that will contain the typed requests (default: "./api.ts")
+- -i, --inline                               If as many things as possible should be inlined or may be spread out over different interfaces and constants
+- -d, --dent &lt;n+(tab/t/space/s)&gt;       The amount of spaces or tabs with which to indent
+- -h, --help                                 Display help for the program
 
 ## Limitations
 
