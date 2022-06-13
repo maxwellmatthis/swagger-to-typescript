@@ -215,7 +215,7 @@ function requestHandler(
     else fetchParams.push(`"${server.url}${pathName}"`);
   } else {
     funcParams.push("host: string");
-    fetchParams.push(`\`\${host}"${templateLiteral}\``);
+    fetchParams.push(`\`\${host}${templateLiteral}\``);
   }
 
   // Request data

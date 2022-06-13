@@ -171,7 +171,7 @@ function requestHandler(schema, inline, indent, pathName, operationName, operati
     }
     else {
         funcParams.push("host: string");
-        fetchParams.push(`\`\${host}"${templateLiteral}\``);
+        fetchParams.push(`\`\${host}${templateLiteral}\``);
     }
     // Request data
     const requestParams = [];
