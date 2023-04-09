@@ -319,7 +319,8 @@ function schemaToTypescriptDefinition(
         let keys: string[] = [];
         if (thing.properties) {
           for (const key of Object.keys(thing.properties) as [keyof Schema]) {
-            keys.push(`${typeof key === "string" ? safeVariableName(key) : key}: ${schemaToTypescriptDefinition(thing.properties[key], inline, schema)}`);
+            const optional = (thing.required && !thing.required.includes(key.toString()));
+            keys.push(`${typeof key === "string" ? safeVariableName(key) : key}${optional ? '?' : ''}: ${schemaToTypescriptDefinition(thing.properties[key], inline, schema)}`);
           }
         }
         if (thing.additionalProperties?.type) keys.push(`[key:string]: ${schemaToTypescriptDefinition(thing.additionalProperties, inline, schema)}`);

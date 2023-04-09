@@ -8,6 +8,10 @@ I looked around for a while but couldn't find a tool that gave me clean, native 
 
 ## Usage
 
+```bash
+node dist/index.js [options]
+```
+
 ### Options
 
 - -s, --source &lt;path-to-openapi-file&gt;  The path to the openapi/swagger file that you want to convert to requests

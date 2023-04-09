@@ -271,7 +271,8 @@ function schemaToTypescriptDefinition(thing, inline, schema) {
                 let keys = [];
                 if (thing.properties) {
                     for (const key of Object.keys(thing.properties)) {
-                        keys.push(`${typeof key === "string" ? (0, utils_1.safeVariableName)(key) : key}: ${schemaToTypescriptDefinition(thing.properties[key], inline, schema)}`);
+                        const optional = (thing.required && !thing.required.includes(key.toString()));
+                        keys.push(`${typeof key === "string" ? (0, utils_1.safeVariableName)(key) : key}${optional ? '?' : ''}: ${schemaToTypescriptDefinition(thing.properties[key], inline, schema)}`);
                     }
                 }
                 if ((_a = thing.additionalProperties) === null || _a === void 0 ? void 0 : _a.type)
